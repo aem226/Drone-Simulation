@@ -79,6 +79,13 @@ class CourseSpec:
         # then flies towars two hoops 
         loop_radius = 1.6
         loop_center = (0.0, 1.2)
+        loop_duration = 2.2
+        total_loop_time = 2
+        
+        hoop1 = np.array([0.0, 5.0, 2.0])
+        hoop2 = np.array([0.0, 8.0, 2.0])
+        
+        
 
 
 # Drone low-level MuJoCo wrapper
