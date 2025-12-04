@@ -97,6 +97,19 @@ class CourseSpec:
             return np.array([x, y, z])
         
         #Hoop Segment 
+        t2 = t - total_loop_time
+        hoop_path_speed = 1.4
+        
+        if t2 < 2.2:
+            target = hoop1
+        else:
+            target = hoop2
+            
+        return np.array([
+            0.0,
+            1.6 * total_loop_time + hoop_path_speed * t2,
+            target[2]
+        ])
         
 
         
