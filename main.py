@@ -85,6 +85,20 @@ class CourseSpec:
         hoop1 = np.array([0.0, 5.0, 2.0])
         hoop2 = np.array([0.0, 8.0, 2.0])
         
+        #loop segment
+        if t < total_loop_time:
+            loop_index = t/ loop_duration
+            theta = 2 * np.pi * loop_index
+            
+            x = loop_center[0] + loop_radius * np.sin(theta)
+            z = loop_center[1] + loop_radius * (1 - np.cos(theta))
+            y =-.8 * t
+            
+            return np.array([x, y, z])
+        
+        #Hoop Segment 
+        
+
         
 
 
