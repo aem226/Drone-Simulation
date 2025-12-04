@@ -1,8 +1,5 @@
 # Skydio X2 in Mujoco
 
-
-![Alt Text](assets/demo.gif)
-
 ## Getting started
 Set-up MuJoCo and the requirements. Then, simply run main.py
 
