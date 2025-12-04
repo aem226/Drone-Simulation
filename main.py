@@ -1,6 +1,3 @@
-###############################################################
-#  FIXED FULL VERSION - DRONE ACROBATICS WITH PPO (WORKING)
-###############################################################
 
 import time
 import os
@@ -15,9 +12,8 @@ import gymnasium as gym
 from gymnasium import spaces
 
 
-################################################################
+
 # Utility functions
-################################################################
 
 def quat_to_euler_xyz(q):
     """Convert quaternion [w,x,y,z] -> roll,pitch,yaw in XYZ order."""
@@ -43,10 +39,7 @@ def loop_trajectory(t, radius=2.0, forward_speed=1.0, center=(0.0, 1.5)):
     y = forward_speed * t
     return np.array([x, y, z])
 
-
-################################################################
 # Course / Obstacle / Specs
-################################################################
 
 @dataclass
 class Obstacle:
@@ -81,18 +74,21 @@ class CourseSpec:
         pos2 = self.trajectory_fn(np.clip(tau + eps, 0, self.duration))
         vel = (pos2 - pos) / eps
         return pos, vel
+    def loop_trajectory(t):
+        #Drone performs in a two verticle loop
+        # then flies towars two hoops 
+        loop_radius = 1.6
+        loop_center = (0.0, 1.2)
 
 
-################################################################
-# Drone low-level MuJoCo wrapper (FIXED)
-################################################################
+# Drone low-level MuJoCo wrapper
 
 class Drone:
     def __init__(self, xml_path="mujoco_menagerie-main/skydio_x2/scene.xml"):
         self.m = mujoco.MjModel.from_xml_path(xml_path)
         self.d = mujoco.MjData(self.m)
 
-        # --- FIXED: use real actuator ranges for 4 motors ---
+
         ctrl_range = self.m.actuator_ctrlrange[:4]
         self.u_center = 0.5 * (ctrl_range[:, 0] + ctrl_range[:, 1])
         self.u_half = 0.5 * (ctrl_range[:, 1] - ctrl_range[:, 0])
@@ -100,7 +96,6 @@ class Drone:
     def reset(self):
         mujoco.mj_resetData(self.m, self.d)
 
-        # --- FIXED: start in a stable hover above ground ---
         self.d.qpos[:3] = np.array([0, 0, 1.5])
         self.d.qpos[3:7] = np.array([1, 0, 0, 0])  # level orientation
         self.d.qvel[:] = 0
@@ -114,7 +109,6 @@ class Drone:
     def step_with_action(self, action):
         action = np.clip(action, -1, 1)
 
-        # --- FIXED: correct mapping [-1,1] -> actuator ctrlrange ---
         u = self.u_center + self.u_half * action
         self.d.ctrl[:4] = u
 
@@ -128,9 +122,9 @@ class Drone:
         return pos, vel, np.array([phi, theta, psi])
 
 
-################################################################
+
 # Environment with RL logic (FIXED)
-################################################################
+
 
 class DroneAcroEnv(gym.Env):
     metadata = {"render_modes": ["human"], "render_fps": 60}
@@ -216,9 +210,7 @@ class DroneAcroEnv(gym.Env):
         return full_obs.astype(np.float32), reward, terminated, truncated, info
 
 
-################################################################
 # PPO Training
-################################################################
 
 def make_env():
     return DroneAcroEnv()
@@ -244,9 +236,7 @@ def train_ppo(total_timesteps=300_000, model_path="ppo_drone_loop.zip"):
     env.close()
 
 
-################################################################
 # PPO Playback
-################################################################
 
 def play_ppo(model_path="ppo_drone_loop.zip"):
     from stable_baselines3 import PPO
@@ -284,10 +274,7 @@ def play_ppo(model_path="ppo_drone_loop.zip"):
             if dt > 0:
                 time.sleep(dt)
 
-
-################################################################
 # Entry point
-################################################################
 
 if __name__ == "__main__":
     MODE = "play"  # change to "play" after training
