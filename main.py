@@ -1,5 +1,6 @@
 import time
 import os
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Callable, Sequence
 
@@ -9,6 +10,10 @@ import mujoco.viewer
 
 import gymnasium as gym
 from gymnasium import spaces
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+DEFAULT_XML_PATH = PROJECT_ROOT / "mujoco_menagerie-main" / "skydio_x2" / "figure8_hoops.xml"
+COURSE_DURATION = 10.0
 
 # Utility functions
 
@@ -28,14 +33,14 @@ def quat_to_euler_xyz(q):
 
 
 def figure8_trajectory(t):
-    # Horizontal figure-8 centered around y ≈ 6.5, z ≈ 2
-    A = 2.0   # left-right span in x
-    B = 1.5   # extent in y around center
+    # Horizontal figure-8 centered around y ~= 6.5 m, z ~= 2 m
+    A = 3.0   # left-right span in x to align with hoop offsets
+    B = 6.0   # extent in y around center (gives +/- 3.0 m)
     y0 = 6.5
     z0 = 2.0
-    speed = 0.5
+    omega = 2.0 * np.pi / COURSE_DURATION
 
-    theta = speed * t
+    theta = omega * t
 
     x = A * np.sin(theta)
     y = y0 + B * np.sin(theta) * np.cos(theta)
@@ -84,8 +89,9 @@ class CourseSpec:
 # Drone low-level MuJoCo wrapper
 
 class Drone:
-    def __init__(self, xml_path="mujoco_menagerie-main/skydio_x2/scene.xml"):
-        self.m = mujoco.MjModel.from_xml_path(xml_path)
+    def __init__(self, xml_path=None):
+        self.xml_path = self._resolve_xml_path(xml_path)
+        self.m = mujoco.MjModel.from_xml_path(self.xml_path)
         self.d = mujoco.MjData(self.m)
 
         ctrl_range = self.m.actuator_ctrlrange[:4]
@@ -116,13 +122,27 @@ class Drone:
         phi, theta, psi = quat_to_euler_xyz(quat)
         return pos, vel, np.array([phi, theta, psi])
 
+    @staticmethod
+    def _resolve_xml_path(xml_path):
+        if xml_path is None:
+            target = DEFAULT_XML_PATH
+        else:
+            target = Path(xml_path)
+            if not target.is_absolute():
+                target = PROJECT_ROOT / target
+
+        if not target.exists():
+            raise FileNotFoundError(f"MuJoCo XML not found: {target}")
+
+        return str(target)
+
 
 # Environment with RL logic 
 
 class DroneAcroEnv(gym.Env):
     metadata = {"render_modes": ["human"], "render_fps": 60}
 
-    def __init__(self, max_time=12.0, xml_path="mujoco_menagerie-main/skydio_x2/scene.xml"):
+    def __init__(self, max_time=12.0, xml_path=None):
         super().__init__()
 
         self.drone = Drone(xml_path)
@@ -132,13 +152,16 @@ class DroneAcroEnv(gym.Env):
         self.course = CourseSpec(
             name="figure8_hoops",
             trajectory_fn=figure8_trajectory,
-            duration=10.0,
+            duration=COURSE_DURATION,
             description="Horizontal figure-8 through four hoops",
             obstacles=(
-                Obstacle(position=[-2.0, 5.0, 2.0], radius=0.6, penalty=120.0, name="hoop1"),
-                Obstacle(position=[ 2.0, 5.0, 2.0], radius=0.6, penalty=120.0, name="hoop2"),
-                Obstacle(position=[-2.0, 8.0, 2.0], radius=0.6, penalty=120.0, name="hoop3"),
-                Obstacle(position=[ 2.0, 8.0, 2.0], radius=0.6, penalty=120.0, name="hoop4"),
+                Obstacle(position=[-2.0, 8.6, 2.0], radius=0.6, penalty=120.0, name="top_left"),
+                Obstacle(position=[ 2.0, 8.6, 2.0], radius=0.6, penalty=120.0, name="top_right"),
+                Obstacle(position=[-3.0, 6.5, 2.0], radius=0.6, penalty=120.0, name="mid_left"),
+                Obstacle(position=[ 0.0, 6.5, 2.0], radius=0.6, penalty=120.0, name="mid_center"),
+                Obstacle(position=[ 3.0, 6.5, 2.0], radius=0.6, penalty=120.0, name="mid_right"),
+                Obstacle(position=[-2.0, 4.4, 2.0], radius=0.6, penalty=120.0, name="bottom_left"),
+                Obstacle(position=[ 2.0, 4.4, 2.0], radius=0.6, penalty=120.0, name="bottom_right"),
             ),
         )
 
