@@ -163,11 +163,11 @@ HOOP_OBSTACLES = (
 
 TRAJECTORY_CONFIGS = {
     "1": dict(
-        name="circle",
-        trajectory_fn=circle_trajectory,
-        duration=COURSE_DURATION,
-        description="Horizontal circular path",
-        obstacles=(),
+    name="circle_smooth",
+    trajectory_fn=circle_trajectory,
+    duration=11.0,
+    description="Takeoff → circle → land",
+    obstacles=(),
     ),
     "2": dict(
         name="power_loop",
@@ -296,50 +296,58 @@ class DroneAcroEnv(gym.Env):
         return np.concatenate([base, tpos, tvel, np.array([prog])])
 
     def step(self, action):
-        self.drone.step_with_action(action)
-        t = self.drone.d.time
+            self.drone.step_with_action(action)
+            t = self.drone.d.time
 
-        pos, vel, angles = self.drone.get_pos_vel_att()
-        target_pos, target_vel, progress = self._desired_state(t)
+            pos, vel, angles = self.drone.get_pos_vel_att()
+            target_pos, target_vel, progress = self._desired_state(t)
 
-        pos_err = pos - target_pos
-        vel_err = vel - target_vel
+            # PPO REWARD FUNCTION
+          
+            reward = 0.0
 
-        reward = -(pos_err @ pos_err + 0.1 * (vel_err @ vel_err))
+            # Position error
+            pos_err = pos - target_pos
+            reward -= 1.5 * np.dot(pos_err, pos_err)
 
-        # Hoop rewards / penalties
-        for obs in self.course.obstacles:
-            dist = np.linalg.norm(pos - obs.position)
-            if dist < 0.3:                 # very close to hoop center
-                reward += 60.0
-            elif dist < obs.radius:        # inside the ring
-                reward += 25.0
-            elif dist < obs.radius + 0.3:  # near the frame: treat like near-crash
-                reward -= obs.penalty
+            # Velocity error
+            vel_err = vel - target_vel
+            reward -= 0.3 * np.dot(vel_err, vel_err)
 
-        phi, theta, psi = angles
-        reward -= 0.3 * (phi ** 2 + theta ** 2)
+            # Attitude penalty
+            phi, theta, psi = angles
+            reward -= 2.0 * (phi*phi + theta*theta)
 
-        terminated = False
-        truncated = False
+            # Bonus for precision
+            if np.linalg.norm(pos_err) < 0.2:
+                reward += 5.0
 
-        if pos[2] < 0.05:
-            reward -= 20.0
+            # Landing reward
+            if target_pos[2] < 0.2 and pos[2] < 0.2:
+                reward += 30.0
 
-        if t - self.hover_time > self.course.duration:
-            reward += self.course.completion_bonus
-            terminated = True
+            terminated = False
+            truncated = False
 
-        if np.linalg.norm(pos) > 25.0:
-            reward -= 100.0
-            terminated = True
+            # Hit the ground too early
+            if pos[2] < 0.05:
+                reward -= 20.0
+                terminated = True
 
-        if t > self.max_time:
-            truncated = True
+            # Too far away (out of bounds)
+            if np.linalg.norm(pos) > 25.0:
+                reward -= 100.0
+                terminated = True
 
-        full_obs = self._compose_obs(self.drone.get_obs(), target_pos, target_vel, progress)
-        info = dict(t=t, pos=pos, vel=vel, progress=progress)
-        return full_obs.astype(np.float32), reward, terminated, truncated, info
+            # End of course time
+            if t > self.max_time:
+                truncated = True
+
+         
+            full_obs = self._compose_obs(self.drone.get_obs(), target_pos, target_vel, progress)
+            info = dict(t=t, pos=pos, vel=vel, progress=progress)
+
+            return full_obs.astype(np.float32), reward, terminated, truncated, info
 
 
 # PPO + training / playback
