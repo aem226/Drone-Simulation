@@ -14,6 +14,16 @@ from gymnasium import spaces
 PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_XML_PATH = PROJECT_ROOT / "mujoco_menagerie-main" / "skydio_x2" / "figure8_hoops.xml"
 COURSE_DURATION = 10.0
+SELECTED_TRAJ_CHOICE = "4"
+
+def choose_trajectory():
+    print("Select trajectory:")
+    print("1. Circle")
+    print("2. Power loop")
+    print("3. Double loops")
+    print("4. Hoops course (default)")
+    choice = input("Enter choice [1-4]: ").strip()
+    return choice if choice in {"1","2","3","4"} else "4"
 
 # Utility functions
 
@@ -47,6 +57,61 @@ def figure8_trajectory(t):
     z = z0
 
     return np.array([x, y, z])
+
+def circle_trajectory(t):
+    """
+    Drone takes off, flies one big circle at z=2m, and lands.
+    """
+    takeoff_time = 1.5
+    cruise_time = 8.0
+    landing_time = 1.5
+    total_time = takeoff_time + cruise_time + landing_time
+
+    # Takeoff: go from z=0 → 2
+    if t < takeoff_time:
+        z = 2.0 * (t / takeoff_time)
+        return np.array([0.0, 0.0, z])
+
+    # Circle flight at z=2
+    if t < takeoff_time + cruise_time:
+        t2 = t - takeoff_time
+        radius = 3.0
+        omega = 2 * np.pi / cruise_time
+        x = radius * np.cos(omega * t2)
+        y = radius * np.sin(omega * t2)
+        z = 2.0
+        return np.array([x, y, z])
+
+    # Landing
+    t3 = t - (takeoff_time + cruise_time)
+    z = 2.0 * (1 - t3 / landing_time)
+    return np.array([0.0, 0.0, max(z, 0.05)])
+
+
+
+def power_loop_trajectory(t):
+    radius = 2.0
+    loop_period = 4.0
+    omega = 2.0 * np.pi / loop_period
+    x = 1.5 * t
+    y = 0.0
+    z = 2.0 + radius * (1.0 - np.cos(omega * t))
+    return np.array([x, y, z])
+
+
+def double_loop_trajectory(t):
+    loop_period = 4.0
+    radius = 2.0
+    omega = 2.0 * np.pi / loop_period
+    loop_index = int(t // loop_period)
+    local_t = t % loop_period
+    x_offset = loop_index * 3.0
+    x = x_offset + radius * np.sin(omega * local_t)
+    y = 0.0
+    z = 2.0 + radius * (1.0 - np.cos(omega * local_t))
+    return np.array([x, y, z])
+
+
 
 
 # Course / Obstacle / Specs
@@ -84,6 +149,48 @@ class CourseSpec:
         pos2 = self.trajectory_fn(np.clip(tau + eps, 0, self.duration))
         vel = (pos2 - pos) / eps
         return pos, vel
+
+
+HOOP_OBSTACLES = (
+    Obstacle(position=[-2.0, 8.6, 2.0], radius=0.6, penalty=120.0, name="top_left"),
+    Obstacle(position=[ 2.0, 8.6, 2.0], radius=0.6, penalty=120.0, name="top_right"),
+    Obstacle(position=[-3.0, 6.5, 2.0], radius=0.6, penalty=120.0, name="mid_left"),
+    Obstacle(position=[ 0.0, 6.5, 2.0], radius=0.6, penalty=120.0, name="mid_center"),
+    Obstacle(position=[ 3.0, 6.5, 2.0], radius=0.6, penalty=120.0, name="mid_right"),
+    Obstacle(position=[-2.0, 4.4, 2.0], radius=0.6, penalty=120.0, name="bottom_left"),
+    Obstacle(position=[ 2.0, 4.4, 2.0], radius=0.6, penalty=120.0, name="bottom_right"),
+)
+
+TRAJECTORY_CONFIGS = {
+    "1": dict(
+        name="circle",
+        trajectory_fn=circle_trajectory,
+        duration=COURSE_DURATION,
+        description="Horizontal circular path",
+        obstacles=(),
+    ),
+    "2": dict(
+        name="power_loop",
+        trajectory_fn=power_loop_trajectory,
+        duration=10.0,
+        description="Single forward power loop",
+        obstacles=(),
+    ),
+    "3": dict(
+        name="double_loops",
+        trajectory_fn=double_loop_trajectory,
+        duration=12.0,
+        description="Two consecutive looping arcs",
+        obstacles=(),
+    ),
+    "4": dict(
+        name="figure8_hoops",
+        trajectory_fn=figure8_trajectory,
+        duration=COURSE_DURATION,
+        description="Horizontal figure-8 through hoops",
+        obstacles=HOOP_OBSTACLES,
+    ),
+}
 
 
 # Drone low-level MuJoCo wrapper
@@ -142,27 +249,22 @@ class Drone:
 class DroneAcroEnv(gym.Env):
     metadata = {"render_modes": ["human"], "render_fps": 60}
 
-    def __init__(self, max_time=12.0, xml_path=None):
+    def __init__(self, max_time=12.0, traj_choice=None, xml_path=None):
         super().__init__()
 
         self.drone = Drone(xml_path)
         self.hover_time = 0.5
         self.max_time = max_time
 
+        choice = traj_choice or SELECTED_TRAJ_CHOICE
+        config = TRAJECTORY_CONFIGS.get(choice, TRAJECTORY_CONFIGS["4"])
+
         self.course = CourseSpec(
-            name="figure8_hoops",
-            trajectory_fn=figure8_trajectory,
-            duration=COURSE_DURATION,
-            description="Horizontal figure-8 through four hoops",
-            obstacles=(
-                Obstacle(position=[-2.0, 8.6, 2.0], radius=0.6, penalty=120.0, name="top_left"),
-                Obstacle(position=[ 2.0, 8.6, 2.0], radius=0.6, penalty=120.0, name="top_right"),
-                Obstacle(position=[-3.0, 6.5, 2.0], radius=0.6, penalty=120.0, name="mid_left"),
-                Obstacle(position=[ 0.0, 6.5, 2.0], radius=0.6, penalty=120.0, name="mid_center"),
-                Obstacle(position=[ 3.0, 6.5, 2.0], radius=0.6, penalty=120.0, name="mid_right"),
-                Obstacle(position=[-2.0, 4.4, 2.0], radius=0.6, penalty=120.0, name="bottom_left"),
-                Obstacle(position=[ 2.0, 4.4, 2.0], radius=0.6, penalty=120.0, name="bottom_right"),
-            ),
+            name=config["name"],
+            trajectory_fn=config["trajectory_fn"],
+            duration=config["duration"],
+            description=config["description"],
+            obstacles=config["obstacles"],
         )
 
         nq = self.drone.m.nq
@@ -246,7 +348,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 def make_env():
-    return DroneAcroEnv()
+    return DroneAcroEnv(traj_choice=SELECTED_TRAJ_CHOICE)
 
 def train_ppo(total_timesteps=300_000, model_path="ppo_drone_figure8.zip"):
     env = DummyVecEnv([make_env])
@@ -270,7 +372,7 @@ def play_ppo(model_path="ppo_drone_figure8.zip"):
     if not os.path.exists(model_path):
         print("Model not found:", model_path)
         return
-    env = DroneAcroEnv()
+    env = DroneAcroEnv(traj_choice=SELECTED_TRAJ_CHOICE)
     model = PPO.load(model_path)
     drone = env.drone
     with mujoco.viewer.launch_passive(drone.m, drone.d) as viewer:
@@ -295,10 +397,35 @@ def play_ppo(model_path="ppo_drone_figure8.zip"):
                 time.sleep(dt)
 
 
-if __name__ == "__main__":
-    MODE = "play"  # change to "play" after training once
+def preview_reference_trajectory(choice, duration=10.0):
+    config = TRAJECTORY_CONFIGS.get(choice, TRAJECTORY_CONFIGS["4"])
+    env = DroneAcroEnv(traj_choice=choice)
+    drone = env.drone
+    traj_fn = config["trajectory_fn"]
+    with mujoco.viewer.launch_passive(drone.m, drone.d) as viewer:
+        t = 0.0
+        dt = drone.m.opt.timestep
+        while viewer.is_running() and t < duration:
+            start = time.time()
+            target = traj_fn(t)
+            drone.d.qpos[:3] = target
+            drone.d.qpos[3:7] = np.array([1, 0, 0, 0])
+            drone.d.qvel[:] = 0
+            mujoco.mj_forward(drone.m, drone.d)
+            viewer.sync()
+            elapsed = time.time() - start
+            if dt > elapsed:
+                time.sleep(dt - elapsed)
+            t += dt
 
-    if MODE == "train":
+
+if __name__ == "__main__":
+    SELECTED_TRAJ_CHOICE = choose_trajectory()
+    mode_choice = input("Mode? (train / play / reference): ").strip().lower()
+
+    if mode_choice == "train":
         train_ppo(300_000)
+    elif mode_choice == "reference":
+        preview_reference_trajectory(SELECTED_TRAJ_CHOICE, duration=10.0)
     else:
         play_ppo()
